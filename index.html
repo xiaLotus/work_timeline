@@ -54,7 +54,11 @@
         </div>
 
         <textarea v-model="newComment" placeholder="輸入今天的更新內容..." class="w-full p-2 mb-2 bg-gray-800 border border-gray-600 rounded text-white"></textarea>
-
+        <textarea
+          placeholder="在此 Ctrl+V 貼上圖片"
+          @paste="handlePaste"
+          class="w-full p-2 mb-4 bg-gray-800 border border-dashed border-yellow-400 rounded text-white"
+        ></textarea>
         <div @click="triggerFileInput" @dragover.prevent @drop.prevent="handleDrop" class="w-full p-6 mb-4 bg-gray-800 border-2 border-dashed border-gray-500 rounded text-center cursor-pointer hover:bg-gray-700">拖曳圖片到這裡、點擊這裡或 Ctrl+V 貼上圖片</div>
 
         <input ref="fileInput" type="file" accept="image/*" multiple class="hidden" @change="handleImageSelect" />
@@ -84,11 +88,16 @@
         <transition-group name="timeline" tag="div" class="mt-6 relative">
           <div class="absolute left-4 top-0 w-px h-full bg-blue-500"></div>
           <!-- <div v-for="(entry, i) in tasks[selectedTaskIndex].timeline.slice().reverse()" :key="entry.id" class="relative pl-12 mb-10"> -->
-          <div
+          <!-- <div
             v-for="(entry, i) in tasks[selectedTaskIndex].timeline.slice().reverse()"
             :key="entry.id || i" 
             class="relative pl-12 mb-10"
-            >
+            > -->
+            <div
+                v-for="(entry, i) in timelineReversed"
+                :key="entry.id"
+                class="relative pl-12 mb-10"
+              >
             <div class="absolute top-1.5 left-2 w-4 h-4 bg-gray-900 border-4 border-blue-500 rounded-full z-10"></div>
             <div class="text-sm text-gray-400 mb-1">{{ entry.timestamp }}</div>
             <div class="bg-gray-800 border border-gray-700 rounded p-4 shadow w-fit">
@@ -114,7 +123,7 @@
   </div>
 
   <script>
-    const { createApp, ref, nextTick, onMounted } = Vue;
+    const { createApp, ref, nextTick, onMounted, computed } = Vue;
 
     createApp({
       components: { draggable: vuedraggable },
@@ -143,7 +152,16 @@
           await new Promise((r) => setTimeout(r, 1500));
           showWelcome.value = false;
 
-          // 載入後端資料
+          // 等 DOM 更新後再 focus
+          nextTick(() => {
+            const focusEl = document.querySelector('textarea[placeholder*="Ctrl+V"]');
+            if (focusEl) {
+              focusEl.focus();
+            } else {
+              console.warn("⚠️ 無法找到貼上區域");
+            }
+          });
+
           loadFromBackend();
         });
 
@@ -174,12 +192,32 @@
 
         const handleImageSelect = (e) => readFiles(Array.from(e.target.files));
         const handleDrop = (e) => readFiles(Array.from(e.dataTransfer.files).filter(f => f.type.startsWith("image/")));
+        // const handlePaste = (e) => {
+        //   const items = Array.from(e.clipboardData.items);
+        //   const images = items.filter(item => item.type.startsWith("image/"))
+        //                       .map(item => item.getAsFile());
+        //   readFiles(images);
+        // };
         const handlePaste = (e) => {
-          const items = Array.from(e.clipboardData.items);
-          const images = items.filter(item => item.type.startsWith("image/"))
-                              .map(item => item.getAsFile());
-          readFiles(images);
+          console.log("📋 paste 事件觸發");
+
+          const clipboardItems = e.clipboardData.items;
+          for (let i = 0; i < clipboardItems.length; i++) {
+            const item = clipboardItems[i];
+            if (item.type.indexOf("image") !== -1) {
+              const blob = item.getAsFile();
+              const reader = new FileReader();
+              reader.onload = () => {
+                console.log("✅ 成功讀取貼上的圖片");
+                previewImages.value.push(reader.result);
+              };
+              reader.readAsDataURL(blob);
+            } else {
+              console.log("❌ 貼上的不是圖片，type:", item.type);
+            }
+          }
         };
+
 
         const readFiles = (files) => {
           files.forEach(file => {
@@ -242,6 +280,10 @@
           await saveToBackend(); // ⬅️ 留言後也自動儲存
         };
 
+        const timelineReversed = computed(() => {
+          return tasks.value[selectedTaskIndex.value]?.timeline.slice().reverse() || [];
+        });
+
 
         const removeComment = async (index) => {
           const realIndex = tasks.value[selectedTaskIndex.value].timeline.length - 1 - index;
@@ -290,10 +332,31 @@
           }
         };
 
+        // const loadFromBackend = async () => {
+        //   try {
+        //     const res = await axios.get('http://127.0.0.1:5000/api/load');
+        //     tasks.value = res.data || [];
+        //   } catch (err) {
+        //     console.error("讀取失敗", err);
+        //   }
+        // };
+
         const loadFromBackend = async () => {
           try {
             const res = await axios.get('http://127.0.0.1:5000/api/load');
             tasks.value = res.data || [];
+
+            // ✅ 加入這段補上缺少的 id
+            tasks.value.forEach(task => {
+              task.timeline.forEach(entry => {
+                if (!entry.id) entry.id = Date.now().toString() + Math.random();
+                entry.images = entry.images?.map(img => ({
+                  id: img.id || Date.now().toString() + Math.random(),
+                  src: img.src
+                })) || [];
+              });
+            });
+
           } catch (err) {
             console.error("讀取失敗", err);
           }
@@ -335,6 +398,8 @@
           saveToBackend,
           loadFromBackend,
           clearBackend, // ✅ 新增這三個
+          selectedTaskIndex,
+          timelineReversed,
 
         };
       },

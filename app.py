@@ -1,3 +1,4 @@
+import hashlib
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import os, json, base64
@@ -25,11 +26,18 @@ def save_data():
             for image in entry.get("images", []):
                 if image["src"].startswith("data:image"):
                     base64_data = image["src"].split(",")[1]
-                    filename = f"{uuid4().hex}.png"
+
+                    # ✅ 建立圖片唯一的雜湊值
+                    image_hash = hashlib.md5(base64_data.encode()).hexdigest()
+                    filename = f"{image_hash}.png"
                     filepath = os.path.join(UPLOAD_FOLDER, filename)
-                    with open(filepath, "wb") as f:
-                        f.write(base64.b64decode(base64_data))
-                    full_url = request.host_url.rstrip('/') + f'/uploads/{filename}'  # 👈 補上完整網址
+
+                    # ✅ 如果圖片不存在才寫入
+                    if not os.path.exists(filepath):
+                        with open(filepath, "wb") as f:
+                            f.write(base64.b64decode(base64_data))
+
+                    full_url = request.host_url.rstrip('/') + f'/uploads/{filename}'
                     new_images.append({"id": image["id"], "src": full_url})
                 else:
                     new_images.append(image)
@@ -37,6 +45,7 @@ def save_data():
 
     with open(DATA_FILE, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
     return jsonify({"status": "saved"})
 
 @app.route('/api/load', methods=['GET'])
