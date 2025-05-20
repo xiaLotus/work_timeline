@@ -2,408 +2,154 @@
 <html lang="zh-Hant">
 <head>
   <meta charset="UTF-8" />
-  <title>任務留言區</title>
+  <title>多任務留言板</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css" />
+  <script src="https://unpkg.com/element-plus"></script>
+  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script> <!-- ✅ 加這一行 -->
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/vuedraggable@4.1.0/dist/vuedraggable.umd.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/viewerjs/dist/viewer.min.js"></script>
-  <link href="https://cdn.jsdelivr.net/npm/viewerjs/dist/viewer.min.css" rel="stylesheet" />
-  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet" />
-  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/vuedraggable@next/dist/vuedraggable.umd.js"></script>
+
   <style>
-    .timeline-enter-active {
-      transition: all 0.4s ease;
+    .prose img {
+      max-width: 100%;
+      border-radius: 0.5rem;
+      margin-top: 0.5rem;
+      margin-bottom: 0.5rem;
     }
-    .timeline-enter-from {
-      opacity: 0;
-      transform: translateY(20px);
-    }
-    @keyframes fadeIn {
+      img.thumbnail {
+        max-width: 120px;
+        max-height: 120px;
+        cursor: zoom-in;
+        transition: 0.2s;
+        border-radius: 0.5rem;
+      }
+      .img-popup {
+        position: fixed;
+        top: 50%; left: 50%;
+        transform: translate(-50%, -50%);
+        z-index: 9999;
+        background: rgba(0,0,0,0.9);
+        padding: 1rem;
+        border-radius: 1rem;
+      }
+      .img-popup img {
+        max-height: 80vh;
+        max-width: 90vw;
+        border-radius: 0.5rem;
+      }
+      @keyframes fadeIn {
       0% { opacity: 0; transform: translateY(10px); }
       100% { opacity: 1; transform: translateY(0); }
     }
     .animate-fadeIn {
-      animation: fadeIn 0.5s ease-out forwards;
-    }
+      animation: fadeIn 0.6s ease-out forwards;
+}
   </style>
 </head>
 <body class="bg-gray-900 text-white">
-  <div id="app" class="flex flex-col md:flex-row h-screen" @paste="handlePaste">
-    <div v-if="showWelcome" class="fixed inset-0 z-50 bg-gray-900 flex items-center justify-center">
-      <h1 class="text-3xl md:text-4xl font-bold text-white opacity-0 animate-fadeIn">
-        {{ welcomeText }}
-      </h1>
-    </div>
+
+  <div id="app" class="flex h-screen">
+      <div id="welcomeOverlay" class="fixed inset-0 z-50 bg-gray-900 flex items-center justify-center" v-if="showWelcome">
+        <h1 class="text-3xl font-bold text-white opacity-0 animate-fadeIn">{{ welcomeText }}</h1>
+      </div>
     <!-- Sidebar -->
-    <div class="md:w-80 bg-gray-800 p-4 overflow-y-auto">
-      <h2 class="text-xl font-bold mb-4">新增今日工作</h2>
-      <input v-model="newTaskTitle" type="text" placeholder="輸入工作標題" class="w-full mb-2 p-2 rounded bg-gray-700 border border-gray-600 text-white" />
-      <button @click="addTask" class="w-full mb-4 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded">新增任務</button>
-      <ul>
-        <li v-for="(task, index) in tasks" :key="index" @click="selectTask(index)" class="mb-2 p-2 bg-gray-700 rounded cursor-pointer hover:bg-gray-600">{{ task.title }}</li>
-      </ul>
+    <div class="w-64 bg-gray-800 p-4 overflow-y-auto">
+      <h2 class="text-xl font-bold mb-4">任務列表</h2>
+      <input v-model="newTaskTitle" class="w-full p-2 mb-2 bg-gray-700 border border-gray-600 rounded text-white" placeholder="新增任務名稱" />
+      <button @click="addTask" class="w-full mb-4 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded">新增任務</button>
+      <draggable 
+        v-model="tasks" 
+        item-key="id" 
+        handle=".drag-handle" 
+        class="space-y-2"
+        @end="saveToBackend"
+        >
+        <template #item="{ element, index }">
+          <li
+            @click="selectTask(index)"
+            :class="[selectedTaskIndex === index ? 'bg-blue-700' : 'bg-gray-700', 'cursor-pointer p-2 rounded hover:bg-gray-600 flex justify-between items-center']"
+          >
+            <span>{{ element.title }}</span>
+            <span class="drag-handle cursor-move text-gray-400">☰</span>
+          </li>
+        </template>
+      </draggable>
     </div>
 
     <!-- Main Content -->
     <div class="flex-1 p-6 overflow-y-auto">
       <div v-if="selectedTaskIndex !== null">
-        <div class="flex justify-between items-center mb-4">
-          <h2 class="text-2xl font-bold">{{ tasks[selectedTaskIndex].title }}</h2>
-          <button @click="exportTimeline" class="text-sm px-3 py-1 bg-yellow-500 hover:bg-yellow-600 rounded">匯出 JSON</button>
-        </div>
+        <h1 class="text-2xl font-bold mb-4">{{ currentTask.title }}</h1>
 
-        <textarea v-model="newComment" placeholder="輸入今天的更新內容..." class="w-full p-2 mb-2 bg-gray-800 border border-gray-600 rounded text-white"></textarea>
-        <textarea
-          placeholder="在此 Ctrl+V 貼上圖片"
+        <div
+          id="editor"
+          contenteditable="true"
           @paste="handlePaste"
-          class="w-full p-2 mb-4 bg-gray-800 border border-dashed border-yellow-400 rounded text-white"
-        ></textarea>
-        <div @click="triggerFileInput" @dragover.prevent @drop.prevent="handleDrop" class="w-full p-6 mb-4 bg-gray-800 border-2 border-dashed border-gray-500 rounded text-center cursor-pointer hover:bg-gray-700">拖曳圖片到這裡、點擊這裡或 Ctrl+V 貼上圖片</div>
+          class="w-full min-h-[8rem] p-4 bg-gray-800 border border-yellow-400 rounded text-white overflow-auto mb-4"
+        ></div>
 
-        <input ref="fileInput" type="file" accept="image/*" multiple class="hidden" @change="handleImageSelect" />
+        <button
+          @click="submitComment"
+          class="bg-green-600 hover:bg-green-700 text-white font-bold px-4 py-2 rounded mb-6"
+        >
+          新增更新
+        </button>
 
-        <draggable v-model="previewImages" class="flex flex-wrap gap-4 mb-4" item-key="src">
-          <template #item="{element, index}">
-            <div class="relative">
-              <img
-                :src="element"
-                @click="previewImage(element)"
-                class="w-24 h-24 object-cover rounded border border-gray-600 cursor-pointer hover:scale-105 transition"
-              />
-              <button
-                @click.stop="removePreviewImage(index)"
-                class="absolute top-1 right-1 bg-red-600 text-white rounded-full w-6 h-6 text-xs flex items-center justify-center"
-              >✕</button>
-            </div>
+        <el-timeline>
+          <el-timeline-item
+            v-for="(entry, i) in timelineOrdered"
+            :key="i"
+            :timestamp="entry.timestamp"
+            placement="top"
+            type="primary"
+          >
+          <el-card
+            shadow="never"
+            :body-style="{ backgroundColor: '#1F2937', padding: '1rem' }"
+            :style="{ backgroundColor: '#1F2937', border: '1px solid #374151', color: 'white' }"
+            @click="entry.isEditing = true"
+          >
+          <template v-if="entry.isEditing">
+              <div
+                contenteditable
+                class="min-h-[6rem] p-2 bg-gray-700 border border-gray-500 rounded outline-none"
+                :ref="el => entry.editRef = el"
+                @blur="saveEntry(entry)"
+                @paste="handlePaste"
+                @click="handleImageClick"
+                v-html="entry.rawHtml"
+              ></div>
+              <div class="flex justify-end mt-4">
+                <button @click.stop="deleteEntry(entry)" class="text-sm text-red-400 hover:text-red-200">
+                  🗑️ 刪除
+                </button>
+              </div>
           </template>
-        </draggable>
-        
 
-        <div class="flex justify-end items-start mb-4">
-          <button :disabled="!newComment.trim() && previewImages.length === 0" @click="addComment" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed">新增更新</button>
+            <template v-else>
+              <div v-html="entry.html" class="prose prose-invert max-w-none"></div>
+                <div class="flex justify-end mt-4">
+                <button @click.stop="deleteEntry(entry)" class="text-sm text-red-400 hover:text-red-200">
+                  🗑️ 刪除
+                </button>
+              </div>
+            </template>
+          </el-card>
+
+          </el-timeline-item>
+        </el-timeline>
+
+        <div v-if="popupImage" class="img-popup" @click="popupImage = null">
+          <img :src="popupImage" />
         </div>
-
-        <!-- Timeline -->
-        <transition-group name="timeline" tag="div" class="mt-6 relative">
-          <div class="absolute left-4 top-0 w-px h-full bg-blue-500"></div>
-          <!-- <div v-for="(entry, i) in tasks[selectedTaskIndex].timeline.slice().reverse()" :key="entry.id" class="relative pl-12 mb-10"> -->
-          <!-- <div
-            v-for="(entry, i) in tasks[selectedTaskIndex].timeline.slice().reverse()"
-            :key="entry.id || i" 
-            class="relative pl-12 mb-10"
-            > -->
-            <div
-                v-for="(entry, i) in timelineReversed"
-                :key="entry.id"
-                class="relative pl-12 mb-10"
-              >
-            <div class="absolute top-1.5 left-2 w-4 h-4 bg-gray-900 border-4 border-blue-500 rounded-full z-10"></div>
-            <div class="text-sm text-gray-400 mb-1">{{ entry.timestamp }}</div>
-            <div class="bg-gray-800 border border-gray-700 rounded p-4 shadow w-fit">
-              <!-- <textarea v-model="entry.text" class="text-white w-full bg-transparent border-none resize-none focus:ring-0 font-semibold"></textarea> -->
-              <textarea
-                v-model="entry.text"
-                @blur="saveToBackend"
-                class="text-white w-full bg-transparent border-none resize-none focus:ring-0 font-semibold overflow-hidden"
-                @input="autoGrow($event)"
-              ></textarea>
-              <div class="space-y-4 mt-2">
-                <img v-for="(img, j) in entry.images" :key="img.id" :src="img.src" @click="toggleZoom(img.id)" :class="['rounded border border-gray-600 block cursor-zoom-in transition-all duration-300', zoomedImages.has(img.id) ? 'max-w-3xl' : 'max-w-xs']" />
-              </div>
-              <div class="flex justify-end mt-2">
-                <button @click="removeComment(i)" class="text-sm text-red-400 hover:underline">刪除</button>
-              </div>
-            </div>
-          </div>
-        </transition-group>
       </div>
-      <div v-else class="text-gray-400 text-lg">← 請從左邊選一個任務來更新</div>
+      <div v-else class="text-lg text-gray-400">← 請選擇一個任務</div>
     </div>
   </div>
 
-  <script>
-    const { createApp, ref, nextTick, onMounted, computed } = Vue;
-
-    createApp({
-      components: { draggable: vuedraggable },
-      setup() {
-        const tasks = ref([]);
-        const newTaskTitle = ref("");
-        const selectedTaskIndex = ref(null);
-        const newComment = ref("");
-        const previewImages = ref([]);
-        const fileInput = ref(null);
-        const zoomedImages = ref(new Set());
-        const showWelcome = ref(true);
-        const welcomeText = ref("");
-        const message = "Hi 👋 使用者，今日想要更新什麼進度？";
-
-        // const addTask = () => {
-        //   if (newTaskTitle.value.trim()) {
-        //     tasks.value.push({ title: newTaskTitle.value, timeline: [] });
-        //     newTaskTitle.value = "";
-        //   }
-        // };
-
-        
-        onMounted(async () => {
-          await typeText(message);
-          await new Promise((r) => setTimeout(r, 1500));
-          showWelcome.value = false;
-
-          // 等 DOM 更新後再 focus
-          nextTick(() => {
-            const focusEl = document.querySelector('textarea[placeholder*="Ctrl+V"]');
-            if (focusEl) {
-              focusEl.focus();
-            } else {
-              console.warn("⚠️ 無法找到貼上區域");
-            }
-          });
-
-          loadFromBackend();
-        });
-
-        const typeText = async (msg) => {
-          for (let i = 0; i <= msg.length; i++) {
-            welcomeText.value = msg.slice(0, i);
-            await new Promise((r) => setTimeout(r, 50));
-          }
-        };
-
-
-        const addTask = async () => {
-          if (newTaskTitle.value.trim()) {
-            tasks.value.push({ title: newTaskTitle.value, timeline: [] });
-            newTaskTitle.value = "";
-            await saveToBackend(); // ⬅️ 新增後即自動儲存
-          }
-        };
-
-        const selectTask = (index) => {
-          selectedTaskIndex.value = index;
-          newComment.value = "";
-          previewImages.value = [];
-          if (fileInput.value) fileInput.value.value = "";
-        };
-
-        const triggerFileInput = () => fileInput.value.click();
-
-        const handleImageSelect = (e) => readFiles(Array.from(e.target.files));
-        const handleDrop = (e) => readFiles(Array.from(e.dataTransfer.files).filter(f => f.type.startsWith("image/")));
-        // const handlePaste = (e) => {
-        //   const items = Array.from(e.clipboardData.items);
-        //   const images = items.filter(item => item.type.startsWith("image/"))
-        //                       .map(item => item.getAsFile());
-        //   readFiles(images);
-        // };
-        const handlePaste = (e) => {
-          console.log("📋 paste 事件觸發");
-
-          const clipboardItems = e.clipboardData.items;
-          for (let i = 0; i < clipboardItems.length; i++) {
-            const item = clipboardItems[i];
-            if (item.type.indexOf("image") !== -1) {
-              const blob = item.getAsFile();
-              const reader = new FileReader();
-              reader.onload = () => {
-                console.log("✅ 成功讀取貼上的圖片");
-                previewImages.value.push(reader.result);
-              };
-              reader.readAsDataURL(blob);
-            } else {
-              console.log("❌ 貼上的不是圖片，type:", item.type);
-            }
-          }
-        };
-
-
-        const readFiles = (files) => {
-          files.forEach(file => {
-            const reader = new FileReader();
-            reader.onload = () => previewImages.value.push(reader.result);
-            reader.readAsDataURL(file);
-          });
-        };
-
-        const removePreviewImage = (index) => previewImages.value.splice(index, 1);
-
-        const toggleZoom = (id) => {
-          zoomedImages.value.has(id) ? zoomedImages.value.delete(id) : zoomedImages.value.add(id);
-        };
-
-        // const addComment = () => {
-        //   if (selectedTaskIndex.value === null || (!newComment.value.trim() && previewImages.value.length === 0)) return;
-        //   const task = tasks.value[selectedTaskIndex.value];
-        //   const timestamp = new Date().toLocaleString("zh-TW", {
-        //     year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
-        //   });
-        //   task.timeline.push({
-        //     id: Date.now().toString() + Math.random(),
-        //     text: newComment.value,
-        //     timestamp,
-        //     images: previewImages.value.map(src => ({ id: Date.now().toString() + Math.random(), src }))
-        //   });
-        //   newComment.value = "";
-        //   previewImages.value = [];
-        //   if (fileInput.value) fileInput.value.value = "";
-        //   nextTick(() => {
-        //     const container = document.querySelector('.overflow-y-auto');
-        //     if (container) container.scrollTo({ top: 0, behavior: 'smooth' });
-        //   });
-        // };
-
-
-        const addComment = async () => {
-          if (selectedTaskIndex.value === null || (!newComment.value.trim() && previewImages.value.length === 0)) return;
-          const task = tasks.value[selectedTaskIndex.value];
-          const timestamp = new Date().toLocaleString("zh-TW", {
-            year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
-          });
-          task.timeline.push({
-            id: Date.now().toString() + Math.random(),
-            text: newComment.value,
-            timestamp,
-            images: previewImages.value.map(src => ({ id: Date.now().toString() + Math.random(), src }))
-          });
-
-          newComment.value = "";
-          previewImages.value = [];
-          if (fileInput.value) fileInput.value.value = "";
-
-          nextTick(() => {
-            const container = document.querySelector('.overflow-y-auto');
-            if (container) container.scrollTo({ top: 0, behavior: 'smooth' });
-          });
-
-          await saveToBackend(); // ⬅️ 留言後也自動儲存
-        };
-
-        const timelineReversed = computed(() => {
-          return tasks.value[selectedTaskIndex.value]?.timeline.slice().reverse() || [];
-        });
-
-
-        const removeComment = async (index) => {
-          const realIndex = tasks.value[selectedTaskIndex.value].timeline.length - 1 - index;
-          tasks.value[selectedTaskIndex.value].timeline.splice(realIndex, 1);
-          await saveToBackend(); // ✅ 刪除後儲存
-        };
-
-        const exportTimeline = () => {
-          const task = tasks.value[selectedTaskIndex.value];
-          const json = JSON.stringify(task.timeline, null, 2);
-          const blob = new Blob([json], { type: 'application/json' });
-          const link = document.createElement('a');
-          link.href = URL.createObjectURL(blob);
-          link.download = `${task.title}_timeline.json`;
-          link.click();
-        };
-
-        const previewImage = (src) => {
-          const container = document.createElement("div");
-          const img = document.createElement("img");
-          img.src = src;
-          container.appendChild(img);
-          document.body.appendChild(container);
-          const viewer = new Viewer(container, {
-            hidden() {
-              viewer.destroy();
-              container.remove();
-            }
-          });
-          viewer.show();
-        };
-
-        const autoGrow = (event) => {
-          const textarea = event.target;
-          textarea.style.height = "auto"; // 先清掉原本高度
-          textarea.style.height = textarea.scrollHeight + "px"; // 設定新高度
-        };
-
-        const saveToBackend = async () => {
-          try {
-            const res = await axios.post('http://127.0.0.1:5000/api/save', tasks.value);
-            alert("✅ 資料已儲存到後端！");
-          } catch (err) {
-            console.error(err);
-            alert("❌ 儲存失敗");
-          }
-        };
-
-        // const loadFromBackend = async () => {
-        //   try {
-        //     const res = await axios.get('http://127.0.0.1:5000/api/load');
-        //     tasks.value = res.data || [];
-        //   } catch (err) {
-        //     console.error("讀取失敗", err);
-        //   }
-        // };
-
-        const loadFromBackend = async () => {
-          try {
-            const res = await axios.get('http://127.0.0.1:5000/api/load');
-            tasks.value = res.data || [];
-
-            // ✅ 加入這段補上缺少的 id
-            tasks.value.forEach(task => {
-              task.timeline.forEach(entry => {
-                if (!entry.id) entry.id = Date.now().toString() + Math.random();
-                entry.images = entry.images?.map(img => ({
-                  id: img.id || Date.now().toString() + Math.random(),
-                  src: img.src
-                })) || [];
-              });
-            });
-
-          } catch (err) {
-            console.error("讀取失敗", err);
-          }
-        };
-
-        const clearBackend = async () => {
-          try {
-            await axios.post('http://127.0.0.1:5000/api/delete');
-            tasks.value = [];
-            alert("🗑️ 已清除後端資料");
-          } catch (err) {
-            console.error("刪除失敗", err);
-          }
-        };
-
-        return {
-          tasks,
-          newTaskTitle,
-          selectedTaskIndex,
-          newComment,
-          previewImages,
-          fileInput,
-          zoomedImages,
-          showWelcome,
-          welcomeText,
-          addTask,
-          selectTask,
-          addComment,
-          handleImageSelect,
-          handleDrop,
-          handlePaste,
-          triggerFileInput,
-          removePreviewImage,
-          toggleZoom,
-          removeComment,
-          exportTimeline,
-          previewImage,
-          autoGrow,
-          saveToBackend,
-          loadFromBackend,
-          clearBackend, // ✅ 新增這三個
-          selectedTaskIndex,
-          timelineReversed,
-
-        };
-      },
-    }).mount("#app");
-  </script>
+  <script src="index.js"></script>
 </body>
 </html>
